@@ -338,82 +338,92 @@ ARC 有效时，该源代码也能写成下面这样:
 另外, 使用 __autoreleasing 修饰符的变量来替代调用 autorelease 方法。对象赋值给有 __autoreleasing 修饰符的变量等价于 MRC 时对象调用 autorelease 方法, 即对象被注册到 autoreleasePool 中。
 也就是说可以理解为，在 ARC 有效时，用 @autoreleasePool块代替 NSAutoreleasePool 类，用附有 __autoreleasing 修饰符的变量替代 autorelease 方法。
 
+<!--![](https://github.com/TRZhangjie/Code_ZJBlog/blob/master/resources/autoreleasePool.png?raw=true)-->
 
+但是显式地附加 __autoreleasing 修饰符和显式地附加 __strong 修饰符一样罕见。
 
+我们通过实例来看看为什么非显式地使用 __autoreleasing 修饰符也可以。
 
+取得非自己生成并持有的对象时，如同以下源代码，虽然可以可以使用 alloc/new/copy/mutableCopy 以为的方法来取得对象时，但是该对象已经被注册到了 autoreleasePool。这同在 MRC 时取得调用了 autorelease 方法是一样的。由于编译器会检查方法名是否以 alloc/new/copy/mutableCopy 开始，如果不是则自动将返回值对象注册到 autoreleasePool 中。
 
-> 但是显式地附加 `__autoreleasing` 修饰符和显式地附加 `__strong` 修饰符一样罕见。
-
-我们通过实例来看看为什么非显式地使用 `__autoreleasing` 修饰符也可以。
-
-##### 1. 可非显示地使用`__autoreleasing` 修饰符 案例1
-
-> `@autoreleasePool` 块中的`__strong` 修饰符对象
-
-思考: 取得 `非自己生成并持有的对象` 时, 我们来思考下 MRC 中，是如何取得 `非自己生成并持有的对象`，是在类方法中 `自己生成并持有的对象` 调用了 `autorelease` 方法，加入到缓存池中。
+另外，根据后面要讲到的遵守内存管理方法命名规则，init 方法返回值的对象不注册到 autoreleasePool 中。
 
 ```
 @autoreleasePool {
-    // 取得非自己生成的对象并持有对象
-    id __strong obj = [NSMutableArray array];
-    
-    /**
-    因为变量obj为强引用，所以自己持有对象。
-    
-    并且该对象，有编译器判断其方法名后自动注册到 autoreleasepool中
-    */
+    id obj = [NSMutableArray array] ;
 }
-/**
-    obj变量超出其作用域，强引用失效，
-    
-    所以自动释放自己持有的对象。
-    
-    同时，随着@autoreleasePool块的结束，
-    注册到 autoreleasepool 中的
-    所有对象被自动释放。
-    
-    因为对象所有者不存在，所以废弃对象。
-*/
 ```
-使用 `alloc/new/copy/mutableCopy` `以外`的方法来取得对象，但是该对象已经被注册到了 `autoreleasepool`。
+我们再来看看该源代码中对象的所有情况。 
 
-命名规则: `init` 方法返回值的对象不注册到`autoreleasepool` 中。
+```
+@autoreleasePool {
+	 // 取得非自己生成并持有的对象
+    id obj = [NSMutableArray array];
+    /*
+     * 因为变量 obj 为强引用，
+     * 所以自己持有对象
+     *  
+     * 并且该对象
+     * 由编译器判断其方法名后
+     * 自动注册到 autoreleasePool    
+     */
+}
+/*
+ * 变量 obj 超出其作用域，强引用失效，
+ * 所以自动释放自己持有的对象
+ * 
+ * 同时随着 @autoreleasePool 块的结束，
+ * 注册到  autoreleasePool 中的
+ * 所有对象被自动释放
+ * 
+ * 因为对象的所有者不存在，所以废弃对象
+ */
+```
+像这样，不使用 __autoreleasing 修饰符也能能使对象注册到 autoreleasePool。
 
-像这样，不使用 `__autoreleasing` 修饰符也能使对象注册到 `autoreleasepool`。
-
-
-我们再来看 `取得非自己生成并持有对象` 的源码
-
+以下为取得 非自己生成并持有对象 时被调用方法的源代码示例。
+ 
 ``` 
 + (id) array {
     id obj = [[NSMutableArray alloc] init];
     return obj;
 }
 ```
-由于 `return` 使得对象变量超出其作用域, 所以该强引用对象的自己持有的对象会被自动释放，但该对象作为函数返回值，编译器会自动将这个对象注册到 `autoreleasepool`中。
+通过一个类方法返回一个 NSMutableArray 对象。
 
-#####  可非显示地使用`__autoreleasing` 修饰符 案例2
+因为没有显示指定所有权修饰符， id obj 默认附有 __strong 所有权修饰符。
 
-> `__weak` 修饰符对象的例子
+由于 return 使得对象变量超出其作用域, 所以该强引用对象的自己持有的对象会被自动释放，但该对象作为函数返回值，编译器会自动将这个对象注册到 autoreleasepool 中。(所以也就能解释通过array方法，取得非自己生成并持有的对象)
 
-虽然 `__weak` 修饰符是为了避免循环引用而使用的，但在访问附有 `__weak` 修饰符变量时，实际上必定要访问注册到 `autoreleasePool` 中的对象。
+以下为使用 __weak 修饰符的例子。虽然 __weak 修饰符是为了避免循环引用而使用的，但在访问附有 __weak 修饰符的变量时，实际上必定要访问注册到 autoreleasepool 中的对象。
+
+```
+id __weak obj1 = obj0;
+NSLog(@"class=%@", [obj1 class]);
+```
+
+与以下源码相同
 
 ```
 id __weak obj1 = obj0;
 
-```
-与一下源码相同
+id __autoreleasing tmp = obj1;
 
-```
-id __weak obj1 = obj0;
-
-id __autoreleasing obj2 = obj1;
+NSLog(@"class=%@", [tmp class]);
 
 ```
 
-为什么在访问附有 `__weak` 修饰符的变量时必须访问注册到 `autoreleasePool` 的对象呢？这是因为 `__weak` 修饰符只持有对象的弱引用，而在访问引用对象的过程中，该对象有可能被废弃。
+**注意===========================================================**
 
-如果把要访问的对象注册到 `autoreleasePool` 中，那么在 `@autoreleasePool` 块结束之前都能确保该对象存在。因此，在使用附有 `__weak` 修饰符的变量时就必定要使用注册到 `autoreleasePool` 中的对象。
+为什么在访问附有 __weak 修饰符的变量时必须访问注册到 autoreleasePool 的对象呢？
+
+这是因为 __weak 修饰符只持有对象的弱引用，而在访问引用对象的过程中，该对象有可能被废弃。
+
+如果把要访问的对象注册到 autoreleasePool 中，那么在 @autoreleasePool 块结束之前都能确保该对象存在。因此，在使用附有 __weak 修饰符的变量时就必定要使用注册到 autoreleasePool 中的对象。
+
+在讲一个例子:
+
+**可非显式地使用 __autoreleasing 修饰符的例子**，和前面讲述的 id obj 完全一样。那么 id 的指针 id *obj 又如何呢？可以由 id obj 例子类推出 id *obj吗？
 
 
 ##### 案例3 : id *obj
