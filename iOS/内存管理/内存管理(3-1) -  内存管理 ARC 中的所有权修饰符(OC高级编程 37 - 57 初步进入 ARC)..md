@@ -1,6 +1,6 @@
  
 
-##  内存管理 ARC 中的所有权修饰符
+##  内存管理 ARC 中的所有权修饰符(OC高级编程 37 - 57 初步进入 ARC)
  
 ARC 有效时，id 类型和对象类型与其他类型不同，其类型上必须附加所有权修饰符。
 
@@ -423,93 +423,105 @@ NSLog(@"class=%@", [tmp class]);
 
 在讲一个例子:
 
-**可非显式地使用 __autoreleasing 修饰符的例子**，和前面讲述的 id obj 完全一样。那么 id 的指针 id *obj 又如何呢？可以由 id obj 例子类推出 id *obj吗？
+**可非显式地使用 __autoreleasing 修饰符的例子**。
 
+和前面讲述的 id obj 完全一样。那么 id 的指针 id *obj 又如何呢？可以由 id obj 例子类推出 id *obj吗？其实，推出来的是 id __autoreleasing *obj。同样地，对象的指针 NSObject * *obj 就变成了 NSObject * __autoreleasing *obj。
 
-##### 案例3 : id *obj
+像这样，id 的指针或对象的指针在没有显式指定时会被附加上 __autoreleasing 修饰符。
 
-思考: 
+比如，为了得到详细的错误信息，经常会在方法的参数中传递 NSError 对象的指针，而不是函数返回值。Cocoa框架中，大多数方法也是用这种方式
 
-前面讲述的 `id obj` 和 `id __string obj` 完全一样。那么 `id` 的指针 `id *obj` 又如何呢? 可以由 `id __string obj` 的例子类推出 `id __string *obj`吗？ 
-其实，推出来的是 `id __autoreleasing *obj`, 同样，对象的指针 `NSObject **obj` 便成为了 `NSObject* __autoreleasing *obj`。
+如 NSString 的类方法等。
 
-像这样，id的指针或对象的指针在没有显式指定时会被附加上 `__autoreleasing` 修饰符。
-
-比如，为了得到详细的错误信息，经常会在方法的参数中传递 `NSError` 对象的指针，而不是函数返回值。Cocoa框架中，大多数方法也是用这种方式，如 NSString 的 string 的 `stringWithContentsOfFile: encoding: error:`类方法等。
+```
++ (nullable instancetype)stringWithContentsOfFile:(NSString *)path encoding:(NSStringEncoding)enc error:(NSError **)error;
+```
 
 使用该方式的源代码如下所示:
 
 ```
 NSError *error = nil;
 
-BOOL result = [obj performOperationWhitError:&error];
+BOOL result = [obj performOperationWithError:&error];
 ```
 该方法的声明为:
 
 ```
-- (BOOL) performOperationWhtiError:(NSError **)error;
+- (BOOL) performOperationWithError:(NSError **)error;
 ```
 
-和前面讲述的一样，id的指针或者对象的指针会默认附加上 `__autoreleasing` 修饰符。所以等同于下列源代码:
+和前面讲述的一样，id 的指针或者对象的指针会默认附加上 `__autoreleasing` 修饰符。所以等同于下列源代码:
 
 ```
-- (BOOL) performOperationWhtiError:(NSError * __autoreleasing *)error;
+- (BOOL) performOperationWithError:(NSError * __autoreleasing *)error;
 ```
 
-参数中持有 `NSError` 对象指针的方法，虽然为响应其执行结果，需要生成 `NSError` 类对象，但也必须符合内存管理的思考方式。
+参数中持有 NSError 对象指针的方法，虽然为响应其执行结果，需要生成 NSError 类对象，但也必须符合内存管理的思考方式。
 
-作为 alloc/new/copy/mutableCopy 方法返回值`取得的对象是自己生成并持有的对象`，其他情况下便是`取得非自己生成并持有的对象`。
+作为 alloc/new/copy/mutableCopy 方法返回值 取得的对象是自己生成并持有的对象 ，其他情况下便是 取得非自己生成并持有的对象。
 
-比如 `performOperationWhtiError` 方法的源代码就应该是下面这样:
+因此，使用附有 __autoreleasing 修饰符的变量作为对象取得参数，与除 alloc/new/copy/mutableCopy 外其他方法的返回值取得对象完全一样，都会注册到 autoreleasePool，并取得非自己生成并持有的对象。
+
+比如 performOperationWithError 方法的源代码就应该是下面这样:
 
 ```
-- (BOOL) performOperationWhtiError:(NSError * __autoreleasing *)error {
+- (BOOL)performOperationWithError:(NSError * __autoreleasing *)error {
     /* 错误发生 */
     *error  = [[NSError alloc] initWithDomain:MyAppDomain code:errorCode userInfo:nil];
-    retrun NO;
+    return NO;
 }
 ```
 
-因为声明为 `NSError * __autoreleasing *` 类型的 `error` 作为 `*error` 被赋值，所以能够返回注册到 `autoreleasePool` 中的对象。
+因为声明为 NSError * __autoreleasing * 类型的 error 作为 *error 被赋值，所以能够返回注册到 autoreleasePool 中的对象。
 
 然而，下面的源代码会产生编译器错误:
 
 ```
 NSError *error = nil;       //NSError * 代表 NSError 类型。
 NSError **pError = &error;  //NSError ** 代码 NSError 类型的指针。
-/*编译错误*/
 ```
+
+为什么会发生错误呢？根据前面所述，我们给其显示的添加所有权修饰符
+
+```
+NSError __strong *error = nil;  
+NSError* __autoreleasing *pError = &error;
+```
+
 赋值给对象指针时，所有权修饰符必须一致。
+
+错误提示: 
+
+```
+error: initializing 'NSError * __autoreleasing *' with an expression 
+		  of type 'NSError * __strong *' changes retain/release properties of pointer 
+		  NSError **pError = &error;
+		  							 ~~~~~~
+``` 
+
+此时，对象指针必须附加 __strong 修饰符 
+
+```
+NSError __strong *error = nil;  
+NSError* __strong *pError = &error;
+```
  
-```
-NSError *error = nil;     
-NSError * __strong * pError = &error;
-/*编译正常*/
-
-
-NSError __weak *error = nil;     
-NSError * __weak * pError = &error;
-/*编译正常*/
-
-
-NSError __unsafe_unretained *error = nil;     
-NSError * __unsafe_unretained * pError = &error;
-/*编译正常*/
-```
-
-前面的方法参数中使用了附有 `__autoreleasing` 修饰符的对象指针类型。
+这样就编译正常了。 __weak, __unsafe_unretained 同理。
+ 
+前面的方法参数中使用了附有 __autoreleasing 修饰符的对象指针类型。
 
 ```
-- (BOOL) performOperationWhtiError:(NSError * __autoreleasing *)error;
+- (BOOL)performOperationWithError:(NSError * __autoreleasing *)error;
 ```
 
-然而调用方法确使用了附有 `__strong` 修饰符的对象指针类型
+然而调用方法 却 使用了附有 __strong 修饰符的对象指针类型
 
 ```
 NSError __strong *error = nil;
 
-BOOL result = [obj performOperationWhitError:&error];
+BOOL result = [obj performOperationWithError:&error];
 ```
+
 上面说到，对象指针类型赋值时，其所有权修饰符必须一致，但为什么该源代码没有警告就顺利通过编译了呢？ 实际上，编译器自动的将该源代码转化成了下面形式。
 
 ```
@@ -517,23 +529,25 @@ NSError __strong *error = nil;
 
 NSError __autoreleasing *tmp = error;
 
-BOOL result = [obj performOperationWhitError:&tmp];
+BOOL result = [obj performOperationWithError:&tmp];
 
-error = tep;
+error = tmp;
 ```
+
 当然也可以显式地指定方法参数中对象指针类型的所有权修饰符。
 
-
 ```
-- (BOOL) performOperationWhtiError:(NSError * __strong *)error;
+- (BOOL)performOperationWithError:(NSError * __strong *)error;
 ```
 
-像该源代码的声明一样，对象不注册到 `autoreleasePool` 也能够传递。但是前面也说过，只有作为 `alloc/new/copy/mutableCopy` 方法的返回值而取得对象时，能够直接生成并持有对象。其他情况即为 `取得非自己生成并持有的对象`，这些务必牢记。为了在使用参数取得对象时，贯彻内存管理的思考方式，我们要将参数声明为附有 `__autoreleasing` 修饰符的对象指针类型。
 
-另外，虽然可以非显式地指定 `__autoreleasing` 修饰符，但在显式地指定 `__autoreleasing` 修饰符时，必须注意对象要为自动变量(包括局部变量、函数以及方法)。
+像该源代码的声明一样，对象不注册到 autoreleasePool 也能够传递。但是前面也说过，只有作为 alloc/new/copy/mutableCopy 方法的返回值而取得对象时，能够直接生成并持有对象。其他情况即为 取得非自己生成并持有的对象 ，这些务必牢记。为了在使用参数取得对象时，贯彻内存管理的思考方式，我们要将参数声明为附有 __autoreleasing 修饰符的对象指针类型。
 
+另外，虽然可以非显式地指定 __autoreleasing 修饰符，但在显式地指定 __autoreleasing 修饰符时，必须注意对象要为自动变量(包括局部变量、函数以及方法)。
 
-#### @autoreleasePool 块嵌套使用
+---
+
+### @autoreleasePool 块嵌套使用
 
 MRC时
 
@@ -561,4 +575,35 @@ ib obj = [[NSObject alloc] init];
     }
 }
 ```
+比如，在 iOS 应用程序模板中，像下面的 main 函数一样，@autoreleasePool 块包含了全部程序。
+
+
+```
+int main(int argc, char * argv[]) {
+    @autoreleasepool {
+        return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class]));
+    }
+}
+```
+NSRunLoop 等实现不论 ARC 有效还是无效，均能够随时的释放注册到 autoreleasePool 中的对象。
+
+另外，如果编辑器版本为 LLVM 3.0 以上，即使 ARC 无效 @autoreleasePool 块也能够使用。
+
+```
+// ARC无效
+@autoreleasePool {
+       id obj = [[NSObject alloc] init];
+       [obj  autorelease];
+   }
+```
+因为 autoreleasePool 范围以块级源代码表示，提高了程序的可读性。
+
+调试用的非公开函数
+
+```
+objc_autoreleasePoolPrint()
+```
+
+利用这一函数可有效地帮助我们调试注册到 autoreleasePool 上的对象。
+
 

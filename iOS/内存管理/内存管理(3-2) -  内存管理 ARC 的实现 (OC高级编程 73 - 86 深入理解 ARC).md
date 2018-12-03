@@ -1,26 +1,34 @@
+##  内存管理 ARC 的实现 (OC高级编程 73 - 86 深入理解 ARC)
 
+-  __strong
+-  __weak      
+-  __unsafe_unretained
+-  __autoreleasing 
 
+上面讲到这几个所有权的修饰符的使用，那么接下来我们深入研究其内部实现。
 
+---
 
-####   alloc/new/copy/mutableCopy 
+### __strong 修饰符
 
-赋值给附有` __strong` 修饰符的变量在实际的程序中到底是这么样运行的呢？
+赋值给附有 __strong 修饰符的变量在实际的程序中到底是这么样运行的呢？
 
 ```
 {
     id __strong obj = [[NSObject alloc] init];
 }
 ```
+在编辑器选项 "-S" 的同时运行 clang, 可取得程序汇编输出。看看汇编输出和 objc4 库的源代码就只能够知道程序是如何运行工作的。该源代码实际上可转换为调用以下的函数，为了便于理解，以后的源代码有时也使用模拟源代码。
 
-该源码实际上可以转换为调用以下函数
-
+编译器的模拟代码
+ 
 ```
-id obj = objc_msgsend(NSObject, @selector(alloc));
+id obj = objc_msgSend(NSObject, @selector(alloc));
 objc_msgSend(obj, @selectro(init));
 objc_release(obj);
 ```
 
-2次调用了` objc_msgSend `方法, 变量作用域结束时通过 `objc_release` 释放对象。虽然 ARC 时不能使用 `release` 方法，但由此可知编译器自动插入了 `release` 。
+如原源代码所示，2次调用了 objc_msgSend 方法, 变量作用域结束时通过 objc_release 释放对象。虽然 ARC 时不能使用 release 方法，但由此可知编译器自动插入了 release。下面我们来看看使用 alloc/new/copy/mutableCopy 以为的方法会是什么情况。
 
 ####  alloc/new/copy/mutableCopy 之外
 
