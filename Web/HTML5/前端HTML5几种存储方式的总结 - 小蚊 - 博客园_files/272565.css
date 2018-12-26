@@ -1,0 +1,80 @@
+#navList li a,#navList a:link{
+text-shadow:none !important;
+}
+a:hover{
+text-decoration:none !important;
+color:#66D9EF !important;
+}
+#sidebar_toptags>.catListTag>ul:after{
+content:"";
+display:block;
+visibility:hidden;
+clear:both;
+}
+#sidebar_toptags>.catListTag>ul li{
+ display:block;
+ margin:5px;
+ padding:5px 10px;
+ float:left;
+ background-color:pink;
+}
+#profile_block{
+border:none;
+}
+#profile_block:hover{
+border:none;
+}
+#wechat{
+padding-top:20px;
+height:40px;
+line-height:40px;
+background-color:#fff;
+text-align:center;
+color:green;
+}
+/*博客推荐与反对的样式*/
+#div_digg{
+    float: none; 
+    position: fixed;
+    bottom: 0;
+    right: 600px;
+}
+//博客内容样式
+html{
+    font-family:"幼圆";
+}
+.start-words{
+  background-color:#6435C9;
+  color:#fff;
+  width:100%;
+  box-sizing:border-box;
+  padding:10px 20px;
+  text-indent:2em;
+  border-radius:5px;
+  font-size:16px;
+  font-family:"幼圆";
+  font-weight:500;
+}
+.assay-title{
+  background-color:#0E6EB8;
+  color:#fff;
+  padding:10px;
+  border-radius:5px;
+  border-radius:5px;
+  font-size:18px;
+  font-family:"幼圆";
+  font-weight:500;
+}
+/*博客头部*/
+#recommand{
+    color: #fff;
+    font-family: "幼圆";
+    font-size: 20px;
+    height: 100px;
+    line-height: 100px;
+    text-align: center;
+    position: absolute;
+    font-weight: normal;
+    left: 150px;
+    top: 180px;
+}
