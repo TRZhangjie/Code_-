@@ -7,6 +7,13 @@
 
 上面讲到这几个所有权的修饰符的使用，那么接下来我们深入研究其内部实现。
 
+- __strong
+- __weak
+- 释放对象
+- 立即释放对象(专栏)
+- allowsWeakReference/retainWeakReference方法(专栏)
+- __autoreleasing 
+
 ---
 
 ### __strong 修饰符
@@ -28,9 +35,9 @@ objc_msgSend(obj, @selectro(init));
 objc_release(obj);
 ```
 
-如原源代码所示，2次调用了 objc_msgSend 方法, 变量作用域结束时通过 objc_release 释放对象。虽然 ARC 时不能使用 release 方法，但由此可知编译器自动插入了 release。下面我们来看看使用 alloc/new/copy/mutableCopy 以为的方法会是什么情况。
+如原源代码所示，2次调用了 objc_msgSend 方法(alloc 方法和 init 方法), 变量作用域结束时通过 objc_release 释放对象。虽然 ARC 时不能使用 release 方法，但由此可知编译器自动插入了 release。下面我们来看看使用 alloc/new/copy/mutableCopy 以为的方法会是什么情况。
 
-####  alloc/new/copy/mutableCopy 之外
+####  alloc/new/copy/mutableCopy 以外的方法
 
 ```
 {
@@ -38,123 +45,110 @@ objc_release(obj);
 }
 ```
 
-虽然调用了我们熟知的 `NSMutableArray` 类的 `array` 类方法，但得到的结果却与之前稍有不同。
+虽然调用了我们熟知的 NSMutableArray 类的 array 类方法，但得到的结果却与之前稍有不同。
 
 ```
-id obj = objc_msgsend(NSMutableArray, @selector(array));
+id obj = objc_msgSend(NSMutableArray, @selector(array));
 objc_retainAutoreleasedReturnValue(obj);
 objc_release(obj);
-
 ```
 
-##### objc_retainAutoreleasedReturnValue 函数
+虽然最开的 array 方法的调用以及最后变量作用域结束时的 release 与之前相同，但中间的 objc_retainAutoreleasedReturnValue 函数是什么呢？
 
-`objc_retainAutoreleasedReturnValue` 函数主要用于最优化程序运行。
+objc_retainAutoreleasedReturnValue 函数主要用于最优化程序运行。顾名思义，它是用于自己持有 (retain) 对象的函数。但它持有的对象应返回注册在 autoreleasePool 中对象的方法，或者是函数的返回值。像该源代码这样，在调用 alloc/new/copy/mutableCopy 以外的方法，即 NSMutableArray 类的 array 类方法等调用之后，由编辑器插入该函数。
 
-顾名思义，它是用于自己持有对象的函数，但它持有的对象应该返回注册在 `autoreleasePool` 中对象的方法，或者是函数的返回值。像这种，`非alloc/new/copy/mutableCopy` 的方法，比如 `NSMutableArray` 类的 `array` 类方法等调用之后，由编译器插入该函数。
+这种 objc_retainAutoreleasedReturnValue 函数是成对的，与之相对的函数是 objc_autoreleaseReturnValue。它用于 alloc/new/copy/mutableCopy 方法以外的 NSMutableArray 类的 array 类方法等返回对象的实现上。
 
-这种 `objc_retainAutoreleasedReturnValue` 函数是成对的，与之相对的函数是 `objc_autoreleaseReturnValue`。
-
-##### objc_autoreleaseReturnValue 函数
-
-`objc_autoreleaseReturnValue` 用于 `非alloc/new/copy/mutableCopy` 返回对象的实现上。
+下面我们看看 NSMutableArray 类的 array 类方法同过编译器会进行怎样的转换。
 
 ```
 + (id) array {
-    retrun [[NSMutableArray alloc] init];
+	return [[NSMutableArray alloc] init];
 }
 ```
+以下为该源代码的转换，转换后的源代码使用了 objc_autoreleaseReturnValue 函数。
 
-源码如下, 调用看 `objc_autoreleaseReturnValue` 函数
 
 ```
+/*编译器的模拟代码*/
 + (id) array {
-   id obj = objc_msgsend(NSMutableArray, @selector(alloc));
-   objc_msgSend(obj, @selectro(init));
-   retrun objc_autoreleaseReturnValue(obj);
+	id obj = objc_msgSend(NSMutableArray, @selector(alloc));
+	objc_msgSend(obj, @selector(init));
+	return objc_autoreleaseReturnValue(obj);
 }
 ```
 
-像该源代码这样，通过使用 `objc_autoreleaseReturnValue` 函数，返回注册到 `autoreleasePool` 中的对象。
+像该源代码这样，返回注册到 autoreleasePool 中对象的方法使用了 objc_autoreleaseReturnValue 函数返回注册到 autoreleasePool 中的对象。但是 objc_autoreleaseReturnValue 函数与 objc_autorelease 函数不同，一般不仅限于注册对象到 autoreleasePool 中。 
 
-但是  `objc_autoreleaseReturnValue` 函数 与 `objc_autorelease` 函数不同，一般不仅限于注册到 `autoreleasePool` 中。 
+objc_autoreleaseReturnValue 函数会检查使用该函数的方法或函数调用方的执行命令列表，如果方法或函数的调用方在调用了方法或函数后紧接着调用 objc_retainAutoreleasedReturnValue() 函数，那么就不将返回的对象注册到 autoreleasePool 中，而是直接传递到方法或函数的调用方。
 
-`objc_autoreleaseReturnValue` 函数会检查使用该函数的方法或者函数调用方的执行命令列表，如果!!! 在方法或者函数的调用方在调用了方法或者函数后紧接着调用了 `objc_retainAutoreleasedReturnValue`函数，那么就不将返回的对象注册到 `autoreleasePool` 中，而是直接传递到方法或者函数的调用方。
+objc_retainAutoreleasedReturnValue 函数与 objc_retain 函数不同，它即便不注册到 autoreleasePool 中而返回对象，也能够正确地获取对象。通过 objc_autoreleaseReturnValue 函数 和 objc_retainAutoreleasedReturnValue 函数的协作，可以不将对象注册到 autoreleasePool 中而直接传递，这一过程达到了最优化。
 
-#### 小结
-
-`objc_retainAutoreleasedReturnValue` 函数与 `objc_retain` 函数不同，它即便不注册到 `autoreleasePool` 中而返回对象，也能够正确的获取对象。
-
-通过 `objc_retainAutoreleasedReturnValue` 和 `objc_autoreleaseReturnValue` 函数的协作，可以将对象不注册到 `autoreleasePool`  中而直接传递， 这一过程到达了最优化。
-
-### __weak修饰符
+![图1-22](https://wx2.sinaimg.cn/mw690/6c63902cgy1fy31gwvgquj20md09n420.jpg) 
 
 ---
 
-#### __weak修饰符回顾与解读
+### __weak 修饰符
 
-就像前面我们看到的一样, `__weak` 修饰符提供的功能如同魔法一般。
+就像前面我们看到的一样, __weak 修饰符提供的功能如同魔法一般。
 
-- 若附有` __weak` 修饰符的变量所引用的对象被废弃，则将 `nil` 赋值给该变量。
-- 使用附有` __weak` 修饰符的变量，即是使用注册到 `autoreleasePool` 中的对象。
+- 若附有 __weak 修饰符的变量所引用的对象被废弃，则将 nil 赋值给该变量。
+- 使用附有 __weak 修饰符的变量，即是使用注册到 autoreleasePool 中的对象。
 
 这些功能就像魔法一样，到底发生了什么，我们一无所知。
 
 ```
 {
-    id __weak obj1 = obj;
+    id __weak weakObj = strongObj;
 }
 ```
-假设变量 `obj` 附有 `__strong` 修饰符且对象被赋值.
+
+假设变量 strongObj 附有 __strong 修饰符且对象被赋值。那么上面该代码的【模拟】源代码如下:
 
 ```
 <!--编译器的模拟代码-->
-id obj1；
-objc_initWeak(&obj1, obj);
-objc_destroyWeak(&obj1); 
-```
-通过 `objc_initWeak` 函数初始化附有 `__weak` 修饰符的变量。
-
-在变量作用域结束时通过 `objc_destroyWeak` 函数释放该变量。
-
-
-如下面代码所示: 
-
-`objc_initWeak` 函数将附有 `__weak` 修饰符的 `变量obj1` 初始化为 `0` 后，会将赋值的`对象obj`作为参数调用 `objc_storeWeak` 函数。
-
-```
-obj1 = 0;
-
-objc_storeWeak(&obj1, obj);
+id weakObj；
+objc_initWeak(&weakObj, strongObj);
+objc_destroyWeak(&weakObj); 
 ```
 
-`objc_destroyWeak` 函数将0做参数调用 `objc_storeWeak` 函数
+通过 objc_initWeak 函数初始化附有 __weak 修饰符的变量。在变量作用域结束时通过 objc_destroyWeak 函数释放该变量。
+
+如下面代码所示, objc_initWeak 函数将附有 __weak 修饰符的初始化为 0 后，会将赋值的对象作为参数调用 objc_storeWeak 函数。
+
+```
+weakObj = 0;
+objc_storeWeak(&weakObj, strongObj);
+```
+
+objc_destroyWeak 函数将 0 做参数调用 objc_storeWeak  函数
  
-
 ```
-objc_storeWeak((&obj1, obj)
-```
-
-即使前面的源码和下面源代码相同
-
-```
-id obj1；
-obj1 = 0；
-objc_storeWeak(&obj1, obj);
-objc_storeWeak(&obj1, 0); 
-<!--赋值初始化传值，销毁传0(看到这里我的理解)-->
+objc_storeWeak((&weakObj, 0)
 ```
 
-##### objc_storeWeak 函数
+即前面的源码和下面源代码相同。
 
-`objc_storeWeak` 函数把第二参数的赋值对象的地址作为键值，将第一个参数附有` __weak` 修饰符的变量的地址注册到 `weak` 表中。如果第二参数为0，则把变量的地址从 `weak` 表中删除。（验证我前面的理解）
+```
+id weakObj；
+weakObj = 0；
+objc_storeWeak(&weakObj, strongObj);
+objc_storeWeak(&weakObj, 0); 
+```
 
-`weak` 表与引用计数表相同，作为散列表被实现。如果使用 `weak`表，将废弃对象的地址作为键值进行检索，就能高效地获取对应的附有 `__weak` 修饰符的变量的地址。另外，由于一个对象可同时赋值给多个附有 `__weak` 修饰符的变量中，所以对于一个键值，可注册多个变量的地址。
+#### objc_storeWeak 函数
 
+objc_storeWeak 函数把第二参数的赋值对象的地址作为键值，将第一个参数附有 __weak  修饰符的变量的地址注册到  weak 表中。如果第二参数为0，则把变量的地址从 weak 表中删除。（验证我前面的理解）
 
-##### 释放对象
+weak 表与 引用计数表 相同，作为散列表被实现。如果使用 weak 表，将废弃 对象的地址 作为键值进行检索，就能高效地获取对应的附有 __weak 修饰符的变量的地址。
 
-释放对象时，废弃谁都不持有的对象的同时，程序的动作是怎样的呢？下面我们来跟踪观察。对象将通过 `objc_release` 函数释放。
+另外，由于一个对象可同时赋值给多个附有 __weak 修饰符的变量中，所以对于一个键值，可注册多个变量的地址。
+
+怎么说呢？其实就是 被赋值的对象的地址作为key，__weak 修饰符的变量地址作为值且能多个值。那么就能高效的找到这些 _weak修饰符的变量地址，从而做一系列的操作。
+
+### 释放对象
+
+释放对象时，废弃谁都不持有的对象的同时，程序的动作是怎样的呢？下面我们来跟踪观察。对象将通过 objc_release 函数释放。
 
 ```
 (1) objc_release
@@ -170,7 +164,7 @@ objc_storeWeak(&obj1, 0);
 (6) objc_clear_deallocating //清除回收
 ``` 
  
- 对象被废弃时最后调用的 `objc_clear_deallocating` 函数的动作如下:
+对象被废弃时最后调用的 objc_clear_deallocating 函数的动作如下:
  
 ```
 (1) 从 weak 表中获取废弃对象的地址为键值的纪录。
@@ -182,36 +176,63 @@ objc_storeWeak(&obj1, 0);
 (4) 从引用计数表中删除废弃对象的地址为键值的纪录。
 ```
 
-根据以上步骤，前面说的如果附有 `__weak` 修饰符的变量所引用的对象被废弃，则将 `nil` 值赋给该变量这一功能即被实现。由此可知如果有大量使用附有 `__weak` 修饰符的变量，则会消耗相应的 `CPU` 资源。良策是只在需要避免循环引用时使用 `__weak` 修饰符。
+根据以上步骤，前面说的如果附有 __weak 修饰符的变量所引用的对象被废弃，则将 nil 值赋给该变量这一功能即被实现。由此可知如果有大量使用附有 __weak 修饰符的变量，则会消耗相应的 CPU 资源。良策是只在需要避免循环引用时使用 __weak 修饰符。
 
-#### 若附有` __weak` 修饰符的变量所引用的对象被废弃，则将 `nil` 赋值给该变量。
+使用 __weak 修饰符时，以下源代码会引起编译器警告。
 
 ```
 {
   id __weak obj = [[NSObject alloc] init];
 }
 ```
+因为该源代码将自己生成并持有的对象赋值给附有 __weak 修饰符的变量中，所以自己并不能持有该对象，这时会被释放并被废弃，因此会引起编译器警告。
 
-将自己生成并持有的对象赋值给附有 `__weak` 修饰符的变量，所以自己并不能持有该对象，这时会被释放并被废弃，因此会引起编译器警告。
+那么编辑器又是如何处理该源代码呢？
 
 ```
 id obj ;
+
 id tmp = objc_msgSend(NSObject, @selector(alloc));
 objc_msgSend(tmp, @selector(init));
+
 objc_initWeak(&obj, tmp);
 obj_release(tmp);
-objc_destroyWeak(&obj); //obj 超出作用域
+objc_destroyWeak(&obj);  
 ```
 
-虽然自己生成并持有的对象通过 `objc_initWeak` 函数被赋值给附有 `__weak` 修饰符的变量中，但编译器判断其并没有持有者，故该对象立即通过 `objc_release` 函数被释放和废弃。
+虽然自己生成并持有的对象通过 objc_initWeak 函数被赋值给附有 __weak 修饰符的变量中，但编译器判断其并没有持有者，故该对象立即通过 objc_release 函数被释放和废弃。
+
+这样一来，nil 就会被赋值给引用废弃对象的附有 __weak 修饰符的变量中。我们可以使用 NSLog 函数来验证一下。
+
+```
+{
+	id __weak obj = [[NSObject alloc] init];
+	NSLog(@"obj = %@", obj);
+}
+```
+日志如下:
+
+```
+obj = (null)
+```
 
 
-[立即释放](http://note.youdao.com/noteshare?id=5804a027f96be4b43fc6f95b13e9d915)
+那么结合之前所说的 objc_storeWeak 函数，上面则能转换成一下形式:
 
-#### 使用附有` __weak` 修饰符的变量，即是使用注册到 `autoreleasePool` 中的对象。
+```
+id obj;
 
-下面我们便来验证这一功能: 使用附有` __weak` 修饰符的变量，即是使用注册到 `autoreleasepool` 中的对象。
+id tmp = objc_msgSend(NSObject, @slector(alloc));
+objc_msgSend(tmp, @selector(init));
 
+objc_storeWeak(&obj, tmp);
+objc_release(tmp);
+objc_storeWeak(&obj, 0);
+```
+
+前面我们用 objc_initWeak, objc_destroyWeak, objc_storeWeak 等函数确认了 weak 修饰符的变量的功能一： 若附有 __weak 修饰符的变量所引用的对象被废弃，则将 nil 赋值给该变量。
+
+**那么接下来我们继续验证确认 weak 修饰符的变量另一个功能：使用附有  __weak 修饰符的变量，即是使用注册到 autoreleasepool 中的对象**
 
 ```
 {
@@ -220,7 +241,10 @@ objc_destroyWeak(&obj); //obj 超出作用域
 }
 ```
 
+该源代码可以转换为如下形式：
+
 ```
+<!--编译器的模拟代码-->
 id obj1;
 objc_initWeak(&obj1, obj);
 id tmp = objc_loadWeakRetained(&obj1);
@@ -228,16 +252,18 @@ objc_autorelease(tmp);
 NSLog(@"%@", tmp);
 objc_destroyWeak(&obj1);
 ```
-与被赋值时相比，在使用附有`weak` 修饰符变量的情形下，增加了对 `objc_loadWeakRetained` 函数和 `objc_autorelease` 函数的调用。这些函数动作如下:
 
-(1) `objc_loadWeakRetained` 函数取出附有 `__weak` 修饰符变量所引用的对象并 `retain`。
+与被赋值时相比，在使用附有 weak 修饰符变量的情形下，增加了对 objc_loadWeakRetained 函数和 objc_autorelease 函数的调用。这些函数动作如下:
 
-(2) `objc_autorelease`  函数将对象注册到 `autoreleasepool` 中。
+```
+(1) objc_loadWeakRetained 函数取出附有 __weak 修饰符变量所引用的对象并 retain 。
 
-由此可知，因为附有 `__weak修饰符变量` 所引用的对象想这样被注册到 `autoreleasepool` 中，所以在 `@autoreleasepool` 块结束之前都可以放心使用。但是，如果大量的使用附有 `__weak修饰符变量` ,注册到 `autoreleasepool` 中的对象也会大量地增加，因此在使用附有 `__weak修饰符的变量` 时，最好先暂时赋值给附有 `__strong` 修饰符的变量后再使用。
+(2) objc_autorelease 函数将对象注册到 autoreleasePool 中。
+```
 
-比如，以下源代码使用了5次附有`__weak` 修饰符的变量o;
+由此可知，因为附有 __weak修饰符变量 所引用的对象像这样被注册到  autoreleasepool 中，所以在 @autoreleasepool 块结束之前都可以放心使用。但是，如果大量的使用附有 __weak修饰符变量,注册到  autoreleasepool 中的对象也会大量地增加，因此在使用附有 __weak 修饰符的变量 时，最好先暂时赋值给附有 __strong 修饰符的变量后再使用。
 
+比如，以下源代码使用了5次附有 __weak 修饰符的变量 o;
 
 ```
 {
@@ -249,11 +275,14 @@ objc_destroyWeak(&obj1);
     NSLog(@"5, %@", o);
 }
 ```
-相应的，变量o所赋值的对象也就注册到 `autoreleasepool` 中5次。
+
+相应的，变量o所赋值的对象也就注册到 autoreleasepool 中 5 次。
+
 ```
 objc[14481]: #############
 objc[14481]: AUTORELEASES POOLS for thread 0xad0892c0      
-objc[14481]: 6 releasrs pending        
+objc[14481]: 6 releases pending   
+objc[14481]: ............................ PAGE (hot) (cold)        
 objc[14481]: [0x6a85028]  ############### POOL 0x6a8528
 objc[14481]: [0x6a8502c]        0x6719e40 NSObject
 objc[14481]: [0x6a85030]        0x6719e40 NSObject
@@ -262,9 +291,215 @@ objc[14481]: [0x6a85038]        0x6719e40 NSObject
 objc[14481]: [0x6a8503c]        0x6719e40 NSObject
 objc[14481]: #############
 ```
-将附有 `__weak` 修饰符的变量o赋值给附有 `__strong` 修饰符的变量后再使用可以避免此类问题。
+将附有 __weak 修饰符的变量 o 赋值给附有 __strong 修饰符的变量后再使用可以避免此类问题。
+
+```
+{
+    id __weak o = obj;
+    id tmp = o;
+    NSLog(@"1, %@", tmp);
+    NSLog(@"2, %@", tmp);
+    NSLog(@"3, %@", tmp);
+    NSLog(@"4, %@", tmp);
+    NSLog(@"5, %@", tmp);
+}
+```
+
+在 "tmp = 0;" 时对象仅登录到 autoreleasePool 中 1 次。
+
+```
+objc[14481]: #############
+objc[14481]: AUTORELEASES POOLS for thread 0xad0892c0      
+objc[14481]: 2 releases pending        
+objc[14481]: ............................ PAGE (hot) (cold)   
+objc[14481]: [0x6a85028]  ############### POOL 0x6a8528
+objc[14481]: [0x6a8502c]        0x6719e40 NSObject
+objc[14481]: #############
+```
+
+---
+
+### 立即释放对象(专栏)
+
+如前所述，以下源代码会引起编译器警告
+
+``` 
+id __weak obj = [[NSObject alloc] init]; 
+```
+
+这是由于编译器判断生成并持有的对象不能继续持有。附有 __unsafe_unretained 修饰符的变量又如何呢？
 
 
+``` 
+id __unsafe_unretained obj = [[NSObject alloc] init]; 
+```
 
+与 __weak 修饰符完全相同，编辑器判断生成并持有的对象不能继续持有，从而发出警告。
+
+该源代码通过编译器转换为以下形式。
+
+```
+id obj = objc_msgSend(NSObject, @selector(alloc));
+objc_msgSend(obj, @selector(init));
+objc_release(obj);
+```
+objc_release 函数立即释放了生成并持有的对象，这样该对象的悬垂指针被赋值给变量 obj 中。
+
+那么如果最初不赋值变量又会如何呢？ 下面的源代码在 MRC 时必定会发生内存泄漏。
+
+```
+[[NSObject alloc] init];
+```
+
+由于源代码不使用返回值的对象，所以编译器发出警告。
+
+```
+warning: expression result unused [-Wunused-value]
+		[[NSObject alloc] init];
+		^~~~~~~~~~~~~~~~~~~~~~~
+```
+
+可像下面这样通过向 void 型转换来避免发送警告。
+
+```
+(void)[[NSObject alloc] init];
+```
+
+不管是否转换为 void, 该源代码都会转换为以下形式
+
+```
+<!--编译器的模拟代码-->
+id tmp = objc_msgSend(NSObject, @selector(alloc));
+objc_msgSend(tmp, @selector(init));
+objc_release(tmp);
+```
+
+虽然没有指定赋值变量，但与赋予附有 __unsafe_unretained 修饰符变量的源代码完全相同。由于不能继续持有生成并持有的对象，所以编译器生成了立即调用 objc_release 函数的源代码。而由于 ARC 的处理，这样的源代码也不会造成内存泄漏。
+
+另外，能调用被立即释放的对象的实例方法吗？
+
+```
+(void)[[[NSObject alloc] init] hash];
+```
+
+该源代码可变为如下形式:
+
+```
+<!--编译器的模拟代码-->
+id tmp = objc_msgSend(NSObject, @selector(alloc));
+objc_msgSend(tmp, @selector(init));
+objc_msgSend(tmp, @selector(hash));
+objc_release(tmp);
+```
+在调用了生成并持有的对象的实例方法后，该对象被释放。看到 "由编译器进行内存管理" 这句话是正确的。
+
+--- 
+
+### allowsWeakReference/retainWeakReference方法(专栏)
+
+实际上还有一种情况也不能使用 __weak 修饰符。
+就是当 allowsWeakReference/retainWeakReference 实例方法(没有写入 NSObject 接口说明文档中) 返回 NO 的情况。这些方法的声明如下:
+
+```
+- (BOOL) allowsWeakReference;
+- (BOOL) retainWeakReference;
+
+```
+在赋值给 __weak 修饰符的变量时，如果赋值对象的 allowsWeakReference 方法返回 NO，程序将异常终止。
+
+```
+cannot form weak reference to instance (0x753e180) of class MyObject
+```
+
+即对于所有 allowsWeakReference 方法返回 NO 的类都绝对不能使用 __weak 修饰符。这样的类必定在其参考说明中有所记述。
+
+另外，在使用 __weak 修饰符的变量时，当被赋值对象的 retainWeakReference 方法返回 NO 的情况下，该变量将使用 "nil"。如以下的源代码:
+
+```
+{
+	id __strong obj = [[NSObject alloc] init];
+	id __weak o = obj;
+	NSLog(@"1, %@", o);
+	NSLog(@"2, %@", o);
+	NSLog(@"3, %@", o);
+	NSLog(@"4, %@", o);
+	NSLog(@"5, %@", o);
+}
+```
+由于最开始生成并持有的对象为附有 __strong 修饰符变量 obj 所持有的强引用，所以在该变量作用域结束之前都始终存在。因此如下所示，在变量作用域结束之前，可以持有使用附有 __weak 修饰符的变量 o 所引用的对象。
+
+```
+1 <NSObject: 0x753e180>
+2 <NSObject: 0x753e180>
+3 <NSObject: 0x753e180>
+4 <NSObject: 0x753e180>
+5 <NSObject: 0x753e180>
+```
+下面对 retainWeakReference 方法进行试验。我们做一个 MyObject 类，让其继承 NSObject 类并实现 retainWeakReference 方法。 
+
+```
+@interface MyObject : NSObject
+{
+	NSUInteger count;
+}
+@end
+
+@implementation MyObject
+- (id)init {
+	self = [super init];
+	return self;
+}
+- (BOOL)retainWeakReference {
+	if (++count > 3) return NO;
+	return [super retainWeakReference];
+}
+@end
+```
+该例中，当 retainWeakReference 方法被调用 4 次或 4 次以上时返回 NO。在之前的源代码中，将从 NSObject 类是生成并持有对象的部分更改为 MyObject 类。
+
+```
+id __strong obj = [[MyObject alloc] init];
+id __weak o = obj;
+NSLog(@"1, %@", o);
+NSLog(@"2, %@", o);
+NSLog(@"3, %@", o);
+NSLog(@"4, %@", o);
+NSLog(@"5, %@", o);
+```
+以下为执行结果。
+
+```
+1 <NSObject: 0x753e180>
+2 <NSObject: 0x753e180>
+3 <NSObject: 0x753e180>
+4 (null)
+5 (null)
+```
+从第 4 次起，使用附有 __weak 修饰符的变量 o 时，由于所引用对象的 retainWeakReference 方法返回 NO，所以无法获取对象。像这样的类也必定在其参考说明中有所技术。
+
+另外，运行时库为了操作 __weak 修饰符在执行过程中调用 allowsWeakReference/retainWeakReference 方法，因此从该方法中再次操作运行时库时，其操作内容会永久等待。原本这些方法并没有记入文档，因此应用程序编程人员不可能实现该方法群，但如果因某些原因而不得不实现，那么还是在全部理解的基础上实现比较好。
+
+---
+
+### __autoreleasing 修饰符
+
+将对象赋值给附有 __autoreleasing 修饰符的变量等同于 ARC 无效时调用对象的 autoreleasing 方法。我们通过以下源代码来看一下。
+
+```
+@autoreleasepool {
+	id __autoreleasing obj = [[NSObject alloc] init];
+}
+```
+
+该源代码主要将 NSObject 类对象注册到 autoreleasePool 中,可作如下变换。
+
+```
+<!--编译器的模拟代码-->
+id pool = objc_autoreleasePoolPush();
+id obj = objc_msgSend(NSObject, @selector(alloc));
+objc_msgSend(obj, @selector(init));
+objc_autorelease(obj);
+objc_autoreleasePoolPop(pool);
+```
 
 
