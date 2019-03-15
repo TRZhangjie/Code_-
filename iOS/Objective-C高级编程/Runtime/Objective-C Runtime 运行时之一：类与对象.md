@@ -228,9 +228,104 @@ metaClass 则提供类方法(+方法)**
 ---
 
 
-runtime
+runtime 提供了大量的函数来操作类与对象。类的操作方法大部分是以 class_ 为前缀的，而对象的操作方法大部分是以 objc_ 或 object_ 为前缀。下面我们将根据这些方法的用途来分类讨论这些方法的使用。
 
 
+#### 类相关操作函数
 
+我们可以回过头去看看 objc_class 的定义，runtime 提供的操作类的方法主要就是针对这个结构体中的各个字段的。下面我们分别介绍这一些的函数。并在最后以实例来演示这些函数的具体用法。
+
+#### 类名(name)
+
+类名操作的函数主要有:
+
+```
+1 // 获取类的类名
+2 const char * class_getName ( Class cls );
+```
+
+- 对于 class_getName 函数，如果传入的 cls 为 Nil，则返回一个字字符串。
+
+##### 父类(super_class)和元类(meta-class)
+
+父类和元类操作的函数主要有：
+
+```
+1 // 获取类的父类
+2 Class class_getSuperclass ( Class cls );
+3
+4 // 判断给定的Class是否是一个元类
+5 BOOL class_isMetaClass ( Class cls );
+```
+
+- class_getSuperclass 函数，当 cls 为 Nil 或者 cls 为根类时，返回 Nil。不过通常我们可以使用NSObject类的superclass方法来达到同样的目的。 
+- class_isMetaClass 函数，如果是 cls 是元类，则返回 YES；如果否或者传入的 cls 为 Nil，则返回 NO。 
+
+##### 实例变量大小(instance_size)
+
+实例变量大小操作的函数有：
+
+```
+1 // 获取实例大小
+2 size_t class_getInstanceSize ( Class cls );
+```
+
+##### 成员变量(ivars)及属性
+
+在 objc_class 中，所有的成员变量、属性的信息是放在链表 ivars 中的。ivars 是一个数组，数组中每个元素是指向 Ivar (变量信息)的指针。runtime 提供了丰富的函数来操作这一字段。大体上可以分为以下几类：
+
+1. 成员变量操作函数，主要包含以下函数：
+
+```
+1 // 获取类中指定名称实例成员变量的信息
+2 Ivar class_getInstanceVariable ( Class cls, const char *name );
+3
+4 // 获取类成员变量的信息
+5 Ivar class_getClassVariable ( Class cls, const char *name );
+6
+7 // 添加成员变量
+8 BOOL class_addIvar ( Class cls, const char *name, size_t size, uint8_t alignment, const char *types );
+9
+10 // 获取整个成员变量列表
+11 Ivar * class_copyIvarList ( Class cls, unsigned int *outCount );
+```
+
+- class_getInstanceVariable 函数，它返回一个指向包含 name 指定的成员信息的 objc_ivar 结构体的指针(Ivar)。
+
+- class_getClassVariable 函数，目前没有找到关于 Objective-C 中类变量的信息，一般认为 Objective-C 不支持类变量。注意: 返回的列表不包含父类的成员变量和属性。
+
+- Objective-C 不支持往已存在的类中添加实例变量，因此不管是系统库提供的类，还是我们自定义的类，都无法动态添加成员变量。但是如果我们运行时来创建一个类的话，又应该如何给它添加成员变量呢？ 这时我们就可以使用 class_addIvar 函数了。不过需要注意的是，这个方法只能在 objc_allocateClassPair 函数与 objc_registerClassPair 之间调用。另外，这个类也不能是元类。成员变量的按字节最小齐量 1<<alignment。这取决于 ivar 的类型和机器的架构。如果变量的类型是指针类型，则传递 log2(sizeof(pointer_type));
+
+- class_copyIvarList 函数，它返回一个指向成员变量信息的数组，数组中每个元素是指向该成员变量信息的 objc_ivar 结构体的指针。这个数组不包含在父类中声明的变量。outCount 指针返回数组的大小。需要注意的是，我们必须使用 free() 来释放这个数组。
+
+2. 属性操作函数，主要包含以下函数:
+
+```
+1 // 获取指定的属性
+2 objc_property_t class_getProperty ( Class cls, const char *name );
+3
+4 // 获取属性列表
+5 objc_property_t * class_copyPropertyList ( Class cls, unsigned int *outCount );
+6
+7 // 为类添加属性
+8 BOOL class_addProperty ( Class cls, const char *name, const 9 objc_property_attribute_t *attributes, unsigned int attributeCount );
+9
+10 // 替换类的属性
+11 void class_replaceProperty ( Class cls, const char *name, const objc_property_attribute_t *attributes, unsigned int attributeCount );
+```
+
+这一种方法也是针对 ivars 来操作，不过只操作那些是属性的值。我们在后面介绍属性时会再遇到这些函数。
+
+3. 在 Mac OSX 系统中，我们可以使用垃圾回收器。runtime 提供了几个函数来确定一个对象的内存区域是否可以被垃圾回收器扫描，以处理 strong/weak 引用。这几个函数定义如下：
+
+
+```
+1 const uint8_t * class_getIvarLayout ( Class cls );
+2 void class_setIvarLayout ( Class cls, const uint8_t *layout );
+3 const uint8_t * class_getWeakIvarLayout ( Class cls );
+4 void class_setWeakIvarLayout ( Class cls, const uint8_t *layout );
+```
+
+但通常情况下，我们不需要去主动调用这些方法；在调用 objc_registerClassPair 时，会生成合理的布局。在此不详细介绍这些函数。
 
 
